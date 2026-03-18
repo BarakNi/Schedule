@@ -2,6 +2,11 @@
    AI Engineer Course — מחזור 8 — Application Logic
    Cache, render, sync, filter, theme, init.
    Depends on: js/data.js (loaded first)
+
+   © 2026 The Hebrew University of Jerusalem
+   (האוניברסיטה העברית בירושלים). All rights reserved.
+   Protected under Israeli Copyright Law and international treaties.
+   Unauthorized use, reproduction, or distribution is prohibited.
    ===================================================================== */
 
 // ---- State ----

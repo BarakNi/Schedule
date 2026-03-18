@@ -1,6 +1,11 @@
 /* =====================================================================
    AI Engineer Course — מחזור 8 — Static Data
    All Drive folder URLs, baseline lectures, and shared resources.
+
+   © 2026 The Hebrew University of Jerusalem
+   (האוניברסיטה העברית בירושלים). All rights reserved.
+   Protected under Israeli Copyright Law and international treaties.
+   Unauthorized use, reproduction, or distribution is prohibited.
    ===================================================================== */
 
 const D = "https://drive.google.com/drive/folders/";
