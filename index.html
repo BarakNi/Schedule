@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>מחזור 8 — AI Engineer Course</title>
+    <meta name="description" content="AI Engineer Course Cohort 8 — Lectures, recordings, materials and resources hub.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <span class="header-emoji">🎓</span>
+            <h1>מחזור 8 — AI Engineer Course</h1>
+            <p>Your study hub · Lectures · Recordings · Materials</p>
+        </div>
+        <div class="header-actions">
+            <button class="header-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+        </div>
+    </div>
+
+    <div class="top-bar">
+        <a href="https://drive.google.com/drive/folders/1WOFft9mQ5VSZZkFNjUF76AowPQXih8Uy" target="_blank" rel="noopener">📁 Drive</a>
+        <a href="https://docs.google.com/spreadsheets/d/1cxswTYY8qLKQ7Lq0JQZ4Bcjc9kp02m3vMOjMJY37wys/edit?gid=0#gid=0" target="_blank" rel="noopener">📋 Recordings</a>
+        <span class="contact-pill">
+            📞 <a href="tel:+972544599661">Michal Fischbein</a> · <a href="https://wa.me/972544599661" target="_blank" rel="noopener">WhatsApp</a>
+        </span>
+    </div>
+
+    <div class="container">
+        <div class="toolbar">
+            <input type="text" class="search-bar" placeholder="Search lectures, topics, files..." id="searchInput" aria-label="Search">
+            <button class="refresh-btn" id="refreshBtn" aria-label="Fetch new content from Drive and spreadsheet">
+                <span class="refresh-icon">&#x21bb;</span> Sync
+            </button>
+        </div>
+        <div id="syncStatus" style="font-size:0.78rem;color:var(--text-muted);text-align:center;margin-bottom:0.5rem;min-height:1.2em;"></div>
+
+        <div class="status-bar">
+            <div class="status-legend">
+                <div class="legend-item"><div class="legend-dot upcoming"></div> Upcoming</div>
+                <div class="legend-item"><div class="legend-dot today"></div> Today</div>
+                <div class="legend-item"><div class="legend-dot past"></div> Past</div>
+            </div>
+            <div class="last-updated" id="lastUpdated"></div>
+        </div>
+
+        <div id="lectureList"><div class="loading"><span class="spinner">&#x21bb;</span> Loading...</div></div>
+    </div>
+
+    <div class="footer">
+        Course Admin: <a href="tel:+972544599661">Michal Fischbein — מיכל פישביין</a> · +972 54-459-9661<br>
+        <span style="opacity:0.6">Data syncs from Google Sheets. Works offline with cached data.</span>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="js/data.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
