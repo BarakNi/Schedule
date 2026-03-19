@@ -19,6 +19,9 @@ function saveCache(data) {
     try {
         localStorage.setItem(CK, JSON.stringify(data));
         localStorage.setItem(CT, new Date().toISOString());
+        // Count total files across all lectures
+        const total = data.reduce((sum, l) => sum + (l.files ? l.files.length : 0), 0);
+        localStorage.setItem("ai8_fc", String(total));
     } catch (e) { console.warn("Cache save failed", e); }
 }
 
@@ -96,9 +99,10 @@ function renderCard(item) {
         return `<li>${fileIcon(type)} <a href="${url}" target="_blank" rel="noopener">${name}</a> ${badgeFor(type)}</li>`;
     }).join("");
     const isNew = item._new ? " new-entry" : "";
+    const autoOpen = item._forceOpen ? " card-open" : "";
     const icon = sectionIcon(item.section);
     const sub = item.desc ? item.desc.substring(0, 60) : "";
-    return `<div class="lecture-card ${status}${isNew}" style="animation-delay:${item._i * 0.04}s">
+    return `<div class="lecture-card ${status}${isNew}${autoOpen}" style="animation-delay:${item._i * 0.04}s">
         <div class="card-toggle" onclick="toggleCard(this)">
             <div class="card-toggle-icon">${icon}</div>
             <div class="card-toggle-info">
@@ -183,11 +187,27 @@ function render(data) {
 function filterContent(query) {
     if (!query || !query.trim()) { render(currentLectures); return; }
     const q = query.toLowerCase().trim();
-    const filtered = currentLectures.filter(item => {
-        const haystack = [item.title, item.desc, item.date, item.section,
-            ...(item.files || []).map(f => f.n || f.name || "")].join(" ").toLowerCase();
-        return haystack.includes(q);
-    });
+    const filtered = [];
+    for (const item of currentLectures) {
+        // Check if card-level fields match
+        const cardText = [item.title, item.desc, item.date, item.section].join(" ").toLowerCase();
+        const cardMatch = cardText.includes(q);
+
+        // Filter files that match
+        const matchedFiles = (item.files || []).filter(f =>
+            (f.n || f.name || "").toLowerCase().includes(q)
+        );
+
+        if (cardMatch || matchedFiles.length > 0) {
+            // Clone and replace files with only matching ones (unless the card itself matched — then keep all)
+            const clone = Object.assign({}, item);
+            if (!cardMatch && matchedFiles.length > 0) {
+                clone.files = matchedFiles;
+            }
+            clone._forceOpen = true; // auto-expand when searching
+            filtered.push(clone);
+        }
+    }
     render(filtered);
 }
 
@@ -202,103 +222,374 @@ function buildSharedItems() {
 }
 
 // =====================================================================
-// SYNC — fetches Drive folders + Sheets, rebuilds everything
+// SYNC — fetches new content from Drive + Sheets, rebuilds view
+// =====================================================================
+// No API key needed. Uses:
+//   1. Google Drive "embeddedfolderview" — server-rendered HTML, parseable
+//   2. Google Sheets CSV export
+//   Both go through a CORS proxy chain.
+// =====================================================================
+
+const PROXIES = [
+    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+];
+
+async function proxyFetch(url) {
+    for (const mkProxy of PROXIES) {
+        try {
+            const resp = await fetch(mkProxy(url));
+            if (resp.ok) return await resp.text();
+        } catch (e) { console.warn("Proxy failed:", e.message); }
+    }
+    // Direct as last resort
+    try { const r = await fetch(url); if (r.ok) return await r.text(); } catch (_) {}
+    return null;
+}
+
+function parseSheetDate(raw) {
+    const m = String(raw).match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+    if (!m) return null;
+    const day = m[1].padStart(2, "0");
+    const month = m[2].padStart(2, "0");
+    let year = m[3];
+    if (year.length === 2) year = "20" + year;
+    return `${year}-${month}-${day}`;
+}
+
+function guessFileType(name) {
+    const n = (name || "").toLowerCase();
+    if (n.endsWith(".pdf")) return "pdf";
+    if (/\.pptx?$/.test(n)) return "slides";
+    if (n.endsWith(".ipynb")) return "notebook";
+    if (n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".webm")) return "video";
+    if (n.endsWith(".py") || n.endsWith(".txt") || n.endsWith(".json") || n.endsWith(".csv")) return "link";
+    return "link";
+}
+
+// =====================================================================
+// Drive folder listing via embeddedfolderview (no auth, server-rendered)
+// =====================================================================
+function parseEmbedHTML(html) {
+    // The embed view (embeddedfolderview) returns server-rendered HTML with
+    // "flip-entry" divs. Confirmed structure:
+    //
+    //   <div class="flip-entry" id="entry-FILE_ID" ...>
+    //     ...
+    //     <div class="flip-entry-title">filename.ext</div>
+    //     ...
+    //   </div>
+    //
+    // We also detect folders vs files by checking for "folder" in the class/aria.
+
+    const files = new Map(); // id → {name, id, isFolder}
+
+    // Primary pattern: flip-entry with id + title
+    // Use a two-pass approach for reliability:
+
+    // Pass 1: Extract all entry IDs and their surrounding HTML chunks
+    const entryRe = /id="entry-([a-zA-Z0-9_-]+)"([\s\S]*?)(?=id="entry-|<\/div>\s*<\/div>\s*<\/body>|$)/gi;
+    let m;
+    while ((m = entryRe.exec(html)) !== null) {
+        const id = m[1];
+        const chunk = m[2];
+
+        // Extract title from the chunk
+        const titleMatch = chunk.match(/class="flip-entry-title"[^>]*>([^<]+)/);
+        if (!titleMatch) continue;
+        const name = titleMatch[1].trim();
+        if (!name) continue;
+
+        // Detect if it's a folder
+        const isFolder = /folder/i.test(chunk.substring(0, 500));
+
+        files.set(id, { id, name, isFolder });
+    }
+
+    // Fallback: if the above found nothing, try a simpler regex
+    if (files.size === 0) {
+        const simpleRe = /entry-([a-zA-Z0-9_-]+)[\s\S]*?flip-entry-title[^>]*>([^<]+)/gi;
+        while ((m = simpleRe.exec(html)) !== null) {
+            const id = m[1];
+            const name = m[2].trim();
+            if (name && !files.has(id)) {
+                files.set(id, { id, name, isFolder: false });
+            }
+        }
+    }
+
+    return Array.from(files.values());
+}
+
+async function listFolderEmbed(folderId) {
+    const url = `https://drive.google.com/embeddedfolderview?id=${folderId}#list`;
+    const html = await proxyFetch(url);
+    if (!html) {
+        console.warn(`[sync] No HTML returned for folder ${folderId}`);
+        return [];
+    }
+    if (html.length < 100 || html.includes('"error"')) {
+        console.warn(`[sync] Bad response for folder ${folderId}:`, html.substring(0, 200));
+        return [];
+    }
+    const files = parseEmbedHTML(html);
+    console.log(`[sync] Folder ${folderId}: parsed ${files.length} items from ${html.length} bytes`);
+    return files;
+}
+
+// =====================================================================
+// Spreadsheet CSV fetch
+// =====================================================================
+async function fetchSheetCSV() {
+    const url = `https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:csv`;
+    const csv = await proxyFetch(url);
+    if (!csv) return null;
+    return csv.split("\n").map(row =>
+        row.split(",").map(cell => cell.replace(/^"|"$/g, "").trim())
+    );
+}
+
+// =====================================================================
+// Parse helpers
+// =====================================================================
+function parseRecordings(rows) {
+    const recordings = {};
+    let currentSection = "python";
+
+    for (const row of rows) {
+        const firstCell = String(row[0] || "").trim();
+        if (/^Lectures/i.test(firstCell)) { currentSection = "lectures"; continue; }
+        if (/^Python/i.test(firstCell)) { currentSection = "python"; continue; }
+
+        const dateKey = parseSheetDate(firstCell);
+        if (!dateKey) continue;
+
+        const urls = [];
+        let label = "";
+        for (let i = 0; i < row.length; i++) {
+            const cell = String(row[i] || "");
+            const found = cell.match(/(https?:\/\/[^\s",]+)/g);
+            if (found) urls.push(...found);
+            if (i === 1 || i === 2) {
+                const txt = cell.replace(/(https?:\/\/[^\s",]+)/g, "").trim();
+                if (txt && !label) label = txt;
+            }
+        }
+
+        if (!recordings[dateKey]) recordings[dateKey] = { urls: [], label, section: currentSection };
+        recordings[dateKey].urls.push(...urls);
+        if (label && !recordings[dateKey].label) recordings[dateKey].label = label;
+        recordings[dateKey].section = currentSection;
+    }
+    return recordings;
+}
+
+// =====================================================================
+// Main sync orchestrator
 // =====================================================================
 async function syncAndRebuild() {
     const btn = document.getElementById("refreshBtn");
-    const status = document.getElementById("syncStatus");
+    const statusEl = document.getElementById("syncStatus");
     btn.classList.add("spinning");
     btn.disabled = true;
-    status.textContent = "⏳ Starting sync...";
-    let newFiles = [];
+    statusEl.textContent = "⏳ Starting sync...";
+    let newFilesCount = 0;
+    let foldersScanned = 0;
+    let totalDriveFiles = 0;
 
     try {
-        // --- Step 1: Fetch recordings from Google Sheets ---
-        status.textContent = "📋 Fetching recording links from spreadsheet...";
-        const recordings = {};
-        try {
-            const sheetUrl = `https://docs.google.com/spreadsheets/d/${SHEET}/gviz/tq?tqx=out:csv`;
-            const resp = await fetch(sheetUrl);
-            if (resp.ok) {
-                const csv = await resp.text();
-                const rows = csv.split("\n");
-                for (const row of rows) {
-                    const dateMatch = row.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
-                    const urlMatch = row.match(/(https?:\/\/[^\s",]+)/g);
-                    if (dateMatch && urlMatch) {
-                        const day = dateMatch[1].padStart(2, "0");
-                        const month = dateMatch[2].padStart(2, "0");
-                        let year = dateMatch[3];
-                        if (year.length === 2) year = "20" + year;
-                        const key = `${year}-${month}-${day}`;
-                        recordings[key] = urlMatch.filter(u =>
-                            u.includes("zoom") || u.includes("drive.google") || u.includes("docs.google"));
-                    }
-                }
-            }
-        } catch (e) { console.warn("Sheet fetch failed (CORS expected):", e); }
-
-        // --- Step 2: Crawl Drive folders for file names ---
-        status.textContent = "📁 Crawling Drive folders for files...";
-        const driveFiles = {};
-        for (const folderId of CRAWL) {
+        // ---- Step 1: Crawl Drive folders via embed view ----
+        const driveFiles = {}; // folderId → { files[], label, section }
+        let done = 0;
+        for (const folder of CRAWL) {
+            done++;
+            statusEl.textContent = `📁 Scanning ${folder.label}... (${done}/${CRAWL.length})`;
             try {
-                const url = `https://drive.google.com/drive/folders/${folderId}`;
-                const resp = await fetch(url);
-                if (resp.ok) {
-                    const html = await resp.text();
-                    const filePattern = /data-id="([^"]+)"[^>]*>([^<]*\.(pdf|pptx?|ipynb|py|mp4|zip|txt))/gi;
-                    let m;
-                    while ((m = filePattern.exec(html)) !== null) {
-                        if (!driveFiles[folderId]) driveFiles[folderId] = [];
-                        driveFiles[folderId].push({
-                            name: m[2],
-                            url: `https://drive.google.com/file/d/${m[1]}/view`,
-                            type: m[2].match(/\.pdf$/i) ? "pdf"
-                                : m[2].match(/\.pptx?$/i) ? "slides"
-                                : m[2].match(/\.ipynb$/i) ? "notebook"
-                                : m[2].match(/\.mp4$/i) ? "video"
-                                : "link"
-                        });
-                    }
-                }
-            } catch (e) { console.warn("Drive crawl failed for", folderId, e); }
+                const files = await listFolderEmbed(folder.id);
+                driveFiles[folder.id] = { files, label: folder.label, section: folder.section };
+                if (files.length > 0) foldersScanned++;
+                totalDriveFiles += files.length;
+                console.log(`[sync] ${folder.label}: ${files.length} files`, files.map(f => f.name));
+            } catch (e) {
+                console.warn(`[sync] Failed for ${folder.label}:`, e);
+                driveFiles[folder.id] = { files: [], label: folder.label, section: folder.section };
+            }
         }
 
-        // --- Step 3: Merge recordings into base lectures ---
-        status.textContent = "🔄 Merging data...";
+        // ---- Step 2: Fetch spreadsheet CSV ----
+        statusEl.textContent = "📋 Fetching recordings spreadsheet...";
+        const sheetRows = await fetchSheetCSV();
+        const recordings = sheetRows ? parseRecordings(sheetRows) : {};
+
+        // ---- Step 3: Merge everything ----
+        statusEl.textContent = "🔄 Merging data...";
         const merged = JSON.parse(JSON.stringify(BASE));
+        const existingDates = new Set(merged.map(l => l.date));
+
+        // Build set of known file URLs and names from BASE
+        const knownUrls = new Set();
+        const knownNames = new Set();
         for (const lec of merged) {
-            if (recordings[lec.date]) {
-                for (const url of recordings[lec.date]) {
-                    const already = lec.files.some(f => (f.u || f.url) === url);
-                    if (!already) {
-                        lec.files.push({ n: "📹 Recording", u: url, t: "video" });
-                        lec._new = true;
-                    }
+            for (const f of lec.files) {
+                if (f.u) knownUrls.add(f.u);
+                // Strip emoji prefix for comparison
+                if (f.n) knownNames.add(f.n.replace(/^[📁🎬📄📓📊🎥🔗📎]\s*/, "").trim().toLowerCase());
+            }
+        }
+
+        // Add Zoom links from spreadsheet to existing lectures
+        for (const lec of merged) {
+            const rec = recordings[lec.date];
+            if (!rec) continue;
+            for (const url of rec.urls) {
+                if (!lec.files.some(f => (f.u || "") === url)) {
+                    lec.files.push({ n: "🎥 Zoom Recording", u: url, t: "video" });
+                    lec._new = true;
+                    newFilesCount++;
                 }
             }
         }
 
-        // Collect newly discovered files
-        for (const [, files] of Object.entries(driveFiles)) {
-            for (const file of files) {
-                const exists = merged.some(l => l.files.some(f => (f.n || f.name) === file.name));
-                if (!exists) newFiles.push(file);
+        // Create new lecture entries for dates in spreadsheet but not in BASE
+        for (const [dateKey, rec] of Object.entries(recordings)) {
+            if (existingDates.has(dateKey)) continue;
+            const label = rec.label || "Session";
+            merged.push({
+                date: dateKey,
+                title: `${label} — ${dateKey.split("-").reverse().join(".")}`,
+                section: rec.section || "lectures",
+                desc: "Discovered during sync",
+                _new: true,
+                files: rec.urls.map(u => ({ n: "🎥 Zoom Recording", u, t: "video" }))
+            });
+            newFilesCount += rec.urls.length;
+        }
+
+        merged.sort((a, b) => a.date.localeCompare(b.date));
+
+        // ---- Step 4: Smart-match discovered Drive files to lectures ----
+        const unmatchedFiles = [];
+
+        // Build a lookup: folder ID → which BASE lectures reference that folder
+        const folderToLectures = {};
+        for (const lec of merged) {
+            for (const f of lec.files) {
+                const u = f.u || "";
+                // Extract folder ID from Drive folder URLs
+                const folderMatch = u.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+                if (folderMatch) {
+                    const fid = folderMatch[1];
+                    if (!folderToLectures[fid]) folderToLectures[fid] = [];
+                    if (!folderToLectures[fid].includes(lec)) folderToLectures[fid].push(lec);
+                }
             }
         }
 
-        // Build shared resources
+        for (const [folderId, data] of Object.entries(driveFiles)) {
+            if (!data.files || !data.files.length) continue;
+            for (const file of data.files) {
+                const fileUrl = file.isFolder ? (D + file.id) : (V + file.id + "/view");
+                const nameLower = file.name.trim().toLowerCase();
+
+                // Skip if already known
+                if (knownUrls.has(fileUrl) || knownNames.has(nameLower)) continue;
+
+                const type = file.isFolder ? "link" : guessFileType(file.name);
+                const displayName = file.isFolder ? ("📁 " + file.name) : file.name;
+                let matched = false;
+
+                // Strategy 1: Folder is directly referenced by a lecture card
+                const linkedLecs = folderToLectures[folderId];
+                if (linkedLecs && linkedLecs.length > 0) {
+                    const lec = linkedLecs[0]; // attach to the first lecture that links this folder
+                    if (!lec.files.some(f => f.u === fileUrl)) {
+                        lec.files.push({ n: displayName, u: fileUrl, t: type });
+                        lec._new = true;
+                        matched = true;
+                        newFilesCount++;
+                    }
+                }
+
+                // Strategy 2: Filename contains a date that matches a lecture
+                if (!matched) {
+                    const dateInName = parseSheetDate(file.name);
+                    if (dateInName) {
+                        const lec = merged.find(l => l.date === dateInName && l.section === data.section);
+                        if (lec && !lec.files.some(f => f.u === fileUrl)) {
+                            lec.files.push({ n: displayName, u: fileUrl, t: type });
+                            lec._new = true;
+                            matched = true;
+                            newFilesCount++;
+                        }
+                    }
+                }
+
+                // Strategy 3: Filename keywords match a lecture title
+                if (!matched) {
+                    // Extract meaningful words from filename (strip extension, split on non-alpha)
+                    const words = nameLower.replace(/\.[^.]+$/, "").split(/[^a-z0-9]+/).filter(w => w.length > 2);
+                    if (words.length > 0) {
+                        let bestLec = null;
+                        let bestScore = 0;
+                        for (const lec of merged.filter(l => l.section === data.section)) {
+                            const lecText = (lec.title + " " + (lec.desc || "")).toLowerCase();
+                            let score = 0;
+                            for (const w of words) {
+                                if (lecText.includes(w)) score++;
+                            }
+                            if (score > bestScore) { bestScore = score; bestLec = lec; }
+                        }
+                        if (bestLec && bestScore >= 1 && !bestLec.files.some(f => f.u === fileUrl)) {
+                            bestLec.files.push({ n: displayName, u: fileUrl, t: type });
+                            bestLec._new = true;
+                            matched = true;
+                            newFilesCount++;
+                        }
+                    }
+                }
+
+                // Strategy 4: Recording files → most recent lecture in same section
+                if (!matched && (type === "video" || /recording/i.test(data.label))) {
+                    const candidates = merged.filter(l => l.section === data.section);
+                    for (let i = candidates.length - 1; i >= 0; i--) {
+                        const lec = candidates[i];
+                        if (!lec.files.some(f => f.u === fileUrl)) {
+                            lec.files.push({ n: displayName, u: fileUrl, t: type });
+                            lec._new = true;
+                            matched = true;
+                            newFilesCount++;
+                            break;
+                        }
+                    }
+                }
+
+                if (!matched) {
+                    unmatchedFiles.push({ name: displayName, url: fileUrl, type, folderLabel: data.label, section: data.section });
+                    newFilesCount++;
+                }
+            }
+        }
+
+        // ---- Step 5: Build shared resources + unmatched ----
         const sharedItems = buildSharedItems();
-        if (newFiles.length > 0) {
-            sharedItems.push({
-                date: new Date().toISOString().slice(0, 10),
-                title: "🆕 Discovered Files (from Sync)",
-                section: "shared",
-                desc: `${newFiles.length} file(s) found during sync`,
-                _new: true,
-                files: newFiles.map(f => ({ n: f.name, u: f.url, t: f.type }))
-            });
+        if (unmatchedFiles.length > 0) {
+            const byFolder = {};
+            for (const f of unmatchedFiles) {
+                const key = f.folderLabel || "Other";
+                if (!byFolder[key]) byFolder[key] = [];
+                byFolder[key].push(f);
+            }
+            for (const [label, files] of Object.entries(byFolder)) {
+                sharedItems.push({
+                    date: new Date().toISOString().slice(0, 10),
+                    title: `🆕 ${label} — New Files`,
+                    section: "shared",
+                    desc: `${files.length} file(s) discovered during sync`,
+                    _new: true,
+                    files: files.map(f => ({ n: f.name, u: f.url, t: f.type }))
+                });
+            }
         }
 
         currentLectures = [...merged, ...sharedItems];
@@ -306,19 +597,23 @@ async function syncAndRebuild() {
         render(currentLectures);
         updateTimestamp();
 
+        // ---- Success ----
         btn.classList.remove("spinning");
         btn.classList.add("success");
-        status.textContent = "✅ Sync complete.";
-        showToast(`Synced — ${merged.length} lectures, ${newFiles.length} new file(s)`);
-        setTimeout(() => { btn.classList.remove("success"); status.textContent = ""; }, 3000);
+        const driveMsg = totalDriveFiles > 0
+            ? `${totalDriveFiles} Drive files from ${foldersScanned} folders`
+            : "⚠️ No Drive files found (folders may require sign-in)";
+        statusEl.textContent = `✅ ${driveMsg}`;
+        showToast(`Synced — ${merged.length} sessions, ${newFilesCount} new items`);
+        setTimeout(() => { btn.classList.remove("success"); statusEl.textContent = ""; }, 5000);
 
     } catch (err) {
         console.error("Sync error:", err);
         btn.classList.remove("spinning");
         btn.classList.add("error");
-        status.textContent = "❌ Sync failed — using cached data.";
-        showToast("Sync failed. Using cached data.");
-        setTimeout(() => { btn.classList.remove("error"); status.textContent = ""; }, 3000);
+        statusEl.textContent = "❌ Sync failed — using cached data.";
+        showToast("Sync failed. Check console for details.");
+        setTimeout(() => { btn.classList.remove("error"); statusEl.textContent = ""; }, 4000);
     } finally {
         btn.disabled = false;
     }
@@ -331,7 +626,8 @@ function updateTimestamp() {
     const el = document.getElementById("lastUpdated");
     const ts = getCacheTimestamp();
     if (ts) {
-        el.textContent = `Last synced: ${ts.toLocaleDateString("en-IL")} ${ts.toLocaleTimeString("en-IL", { hour: "2-digit", minute: "2-digit" })}`;
+        const fc = localStorage.getItem("ai8_fc") || "0";
+        el.textContent = `Last synced: ${ts.toLocaleDateString("en-IL")} ${ts.toLocaleTimeString("en-IL", { hour: "2-digit", minute: "2-digit" })} · ${fc} files`;
     }
 }
 
@@ -357,10 +653,64 @@ function initTheme() {
 }
 
 // =====================================================================
+// DISCLAIMER MODAL — intercepts all outbound link clicks
+// =====================================================================
+let disclaimerAccepted = false;
+let pendingUrl = null;
+
+function initDisclaimer() {
+    const modal = document.getElementById("disclaimerModal");
+    const acceptBtn = document.getElementById("disclaimerAccept");
+    const declineBtn = document.getElementById("disclaimerDecline");
+
+    // Check if already accepted this session
+    if (sessionStorage.getItem("ai8_terms") === "1") {
+        disclaimerAccepted = true;
+    }
+
+    // Intercept all clicks on links with target="_blank" (outbound)
+    document.addEventListener("click", function (e) {
+        const link = e.target.closest('a[target="_blank"]');
+        if (!link) return;
+        if (disclaimerAccepted) return; // already accepted this session
+
+        e.preventDefault();
+        e.stopPropagation();
+        pendingUrl = link.href;
+        modal.classList.add("visible");
+    }, true);
+
+    acceptBtn.addEventListener("click", function () {
+        disclaimerAccepted = true;
+        sessionStorage.setItem("ai8_terms", "1");
+        modal.classList.remove("visible");
+        if (pendingUrl) {
+            window.open(pendingUrl, "_blank", "noopener");
+            pendingUrl = null;
+        }
+    });
+
+    declineBtn.addEventListener("click", function () {
+        pendingUrl = null;
+        modal.classList.remove("visible");
+        showToast("Access declined. You must accept the terms to view materials.");
+    });
+
+    // Close on overlay click (outside modal)
+    modal.addEventListener("click", function (e) {
+        if (e.target === modal) {
+            pendingUrl = null;
+            modal.classList.remove("visible");
+        }
+    });
+}
+
+// =====================================================================
 // INIT
 // =====================================================================
 function init() {
     initTheme();
+    initDisclaimer();
 
     // Load from cache or use baseline
     const cached = loadCache();

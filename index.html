@@ -58,11 +58,6 @@
         <div id="syncStatus" style="font-size:0.78rem;color:var(--text-muted);text-align:center;margin-bottom:0.5rem;min-height:1.2em;"></div>
 
         <div class="status-bar">
-            <div class="status-legend">
-                <div class="legend-item"><div class="legend-dot upcoming"></div> Upcoming</div>
-                <div class="legend-item"><div class="legend-dot today"></div> Today</div>
-                <div class="legend-item"><div class="legend-dot past"></div> Past</div>
-            </div>
             <div class="last-updated" id="lastUpdated"></div>
         </div>
 
@@ -100,6 +95,34 @@
     </div>
 
     <div class="toast" id="toast"></div>
+
+    <!-- Disclaimer modal — intercepts all outbound link clicks -->
+    <div class="modal-overlay" id="disclaimerModal">
+        <div class="modal">
+            <div class="modal-icon">⚖️</div>
+            <h2 class="modal-title">Terms of Use — Disclaimer</h2>
+            <div class="modal-body">
+                <p>
+                    All content you are about to access — including lectures, recordings, slides,
+                    source code, exercises, and documentation — is the exclusive intellectual property of
+                    <strong>The Hebrew University of Jerusalem</strong> (האוניברסיטה העברית בירושלים).
+                </p>
+                <p>
+                    By proceeding, you confirm and agree that:
+                </p>
+                <ul>
+                    <li>You are an enrolled student of the AI Engineer Course — מחזור 8 (Cohort 8).</li>
+                    <li>You will use these materials solely for personal, non-commercial, educational purposes.</li>
+                    <li>You will not copy, redistribute, reproduce, publicly display, transmit, or create derivative works from these materials — in whole or in part — without express prior written permission.</li>
+                    <li>You understand that violations may result in disciplinary action, civil liability, and criminal prosecution under Israeli Copyright Law (חוק זכות יוצרים, התשס״ח-2007) and applicable international treaties.</li>
+                </ul>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" id="disclaimerDecline">Decline</button>
+                <button class="modal-btn modal-btn-accept" id="disclaimerAccept">I Accept the Terms</button>
+            </div>
+        </div>
+    </div>
 
     <script src="js/data.js"></script>
     <script src="js/app.js"></script>

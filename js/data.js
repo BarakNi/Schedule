@@ -30,13 +30,28 @@ const SHEET = "1cxswTYY8qLKQ7Lq0JQZ4Bcjc9kp02m3vMOjMJY37wys";
 const CK = "ai8_data";
 const CT = "ai8_ts";
 
-// Folders to crawl during sync
+// =====================================================================
+// SYNC CONFIGURATION
+// =====================================================================
+// No API key needed — sync uses Google Drive's embed view + CORS proxy.
+// If embed view doesn't work for your folders, you can optionally deploy
+// apps-script/Code.gs as a Google Apps Script web app and set the URL below.
+// =====================================================================
+const APPS_SCRIPT_URL = ""; // Optional: Apps Script URL for more reliable sync
+
+// Folders to crawl during sync — label is used to match files to lectures
 const CRAWL = [
-    "1QYENoR1siwGgKBcgBfEkwVnRo4EWGm4E",  // Python Prep
-    "16kyplkQtvjPAFiIosgdD8iTrEQ7QsrkK",  // Slides Zvi
-    "1KqGgRCUsvMWp92WDAeS5TCXArRvI3EMY",  // Exercises Roei
-    "1_OJl0G0uYx9zg5AUfOpIUtIKzLKP5oMC",  // Zvi Recordings
-    "1tzMq9eUcRwaUwuoXHwpoQUF-44ZngxV2",  // Python Recordings
+    { id: "1QYENoR1siwGgKBcgBfEkwVnRo4EWGm4E", label: "Python Prep",       section: "python" },
+    { id: "16kyplkQtvjPAFiIosgdD8iTrEQ7QsrkK", label: "Slides Zvi",        section: "lectures" },
+    { id: "1KqGgRCUsvMWp92WDAeS5TCXArRvI3EMY", label: "Exercises Roei",     section: "python" },
+    { id: "1_OJl0G0uYx9zg5AUfOpIUtIKzLKP5oMC", label: "Zvi Recordings",    section: "lectures" },
+    { id: "1tzMq9eUcRwaUwuoXHwpoQUF-44ZngxV2", label: "Python Recordings",  section: "python" },
+    { id: "1M3csnC60aoefzKYka4_O7JTq7v2hNXus", label: "Supervised Learning",section: "lectures" },
+    { id: "15xNmQQEWxHzJgmP9RPUac9h1pC8Z9YyF", label: "DS Foundations",     section: "lectures" },
+    { id: "1JwUvKQ6eXAs4oclWgilVreLpQaax-knu", label: "Intro Folder",       section: "lectures" },
+    { id: "17I81ot8JtNbfmZvXs2b7oG_HkNdy_TJL", label: "Intro Code",        section: "lectures" },
+    { id: "1mcWoebpNo_KsUy3CLvLP-k6plNEtYkxd", label: "Exercises class2",   section: "python" },
+    { id: "116qIL9rDMXrWRpA_o6pFr3h5JxNzbTc-", label: "Exercises class3",   section: "python" },
 ];
 
 // =====================================================================
@@ -117,8 +132,15 @@ const BASE = [
         {n:"WebAPItoLLM.ipynb",u:V+"1lomvR7WlCoMdcOmoa9AuBjrJeOTPKUdr/view",t:"notebook"},
         {n:"01. Data Science Foundations.pdf",u:V+"16rqyENGCgSzFRRWelhvDV0AGcT6OPdA4/view",t:"pdf"},
         {n:"llm_requirements.txt",u:V+"1ROwmmGDd_LKg7XRmvdvofSugpSmKWAWB/view",t:"link"},
+        {n:"requirements_supervised.txt",u:V+"1lUfuxvDu2OXWRgl0n2z-7qEyerR7_uWp/view",t:"link"},
         {n:"📁 Supervised Learning",u:F.supervisedLrn,t:"slides"},
         {n:"📁 Recording Folder",u:D+"19TXphkYDZUaFxBOWTlKWKuGS_ZOXImIh",t:"link"},
+      ]},
+    { date:"2026-03-18", title:"Tirgul 4 — Exercise Session", section:"python",
+      desc:"Practice session with Roei",
+      files:[
+        {n:"📁 Exercises Folder",u:F.exercisesRoei,t:"link"},
+        {n:"Recording (coming soon)",u:"#",t:"video"},
       ]},
 ];
 

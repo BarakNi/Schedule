@@ -515,3 +515,83 @@ body {
     font-size: 0.75rem;
     color: var(--text-muted);
 }
+
+/* ---- Disclaimer modal ---- */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+}
+.modal-overlay.visible { display: flex; }
+.modal {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    max-width: 520px;
+    width: 100%;
+    padding: 1.8rem 2rem;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.25);
+    border: 1px solid var(--border);
+    animation: modalIn 0.3s ease-out;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(16px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-icon { font-size: 2rem; text-align: center; margin-bottom: 0.5rem; }
+.modal-title {
+    font-size: 1.05rem;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 0.8rem;
+    color: var(--text);
+}
+.modal-body {
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+    margin-bottom: 1.2rem;
+}
+.modal-body p { margin-bottom: 0.5rem; }
+.modal-body strong { color: var(--text); }
+.modal-body ul {
+    margin: 0.4rem 0 0.5rem 1.2rem;
+    padding: 0;
+}
+.modal-body li { margin-bottom: 0.3rem; }
+.modal-actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: flex-end;
+}
+.modal-btn {
+    padding: 0.55rem 1.1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all var(--transition);
+}
+.modal-btn-cancel {
+    background: var(--gray-bg);
+    color: var(--text-secondary);
+}
+.modal-btn-cancel:hover { background: var(--border); }
+.modal-btn-accept {
+    background: var(--accent);
+    color: white;
+}
+.modal-btn-accept:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
