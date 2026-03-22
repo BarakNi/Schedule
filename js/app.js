@@ -399,22 +399,45 @@ async function syncAndRebuild() {
     let totalDriveFiles = 0;
 
     try {
-        // ---- Step 1: Crawl Drive folders via embed view ----
+        // ---- Step 1: Crawl Drive folders via embed view (recursive) ----
         const driveFiles = {}; // folderId → { files[], label, section }
         let done = 0;
-        for (const folder of CRAWL) {
+
+        // Recursive crawl: scan a folder, and if subfolders are found, scan those too
+        async function crawlFolder(id, label, section, depth) {
+            if (depth > 2) return; // max 3 levels deep
+            if (driveFiles[id]) return; // already scanned
             done++;
-            statusEl.textContent = `📁 Scanning ${folder.label}... (${done}/${CRAWL.length})`;
+            statusEl.textContent = `📁 Scanning ${label}... (${done} folders)`;
             try {
-                const files = await listFolderEmbed(folder.id);
-                driveFiles[folder.id] = { files, label: folder.label, section: folder.section };
-                if (files.length > 0) foldersScanned++;
+                const items = await listFolderEmbed(id);
+                const files = [];
+                const subfolders = [];
+                for (const item of items) {
+                    if (item.isFolder) {
+                        subfolders.push(item);
+                    }
+                    files.push(item);
+                }
+                driveFiles[id] = { files, label, section };
                 totalDriveFiles += files.length;
-                console.log(`[sync] ${folder.label}: ${files.length} files`, files.map(f => f.name));
+                if (files.length > 0) foldersScanned++;
+                console.log(`[sync] ${label}: ${files.length} items (${subfolders.length} subfolders)`, files.map(f => f.name));
+
+                // Recursively crawl discovered subfolders
+                for (const sub of subfolders) {
+                    // Inherit section from parent, use subfolder name as label
+                    await crawlFolder(sub.id, sub.name, section, depth + 1);
+                }
             } catch (e) {
-                console.warn(`[sync] Failed for ${folder.label}:`, e);
-                driveFiles[folder.id] = { files: [], label: folder.label, section: folder.section };
+                console.warn(`[sync] Failed for ${label}:`, e);
+                driveFiles[id] = { files: [], label, section };
             }
+        }
+
+        // Start with all configured CRAWL folders
+        for (const folder of CRAWL) {
+            await crawlFolder(folder.id, folder.label, folder.section, 0);
         }
 
         // ---- Step 2: Fetch spreadsheet CSV ----
@@ -471,12 +494,11 @@ async function syncAndRebuild() {
         // ---- Step 4: Smart-match discovered Drive files to lectures ----
         const unmatchedFiles = [];
 
-        // Build a lookup: folder ID → which BASE lectures reference that folder
+        // Build lookup: folder ID → lectures that reference it
         const folderToLectures = {};
         for (const lec of merged) {
             for (const f of lec.files) {
                 const u = f.u || "";
-                // Extract folder ID from Drive folder URLs
                 const folderMatch = u.match(/\/folders\/([a-zA-Z0-9_-]+)/);
                 if (folderMatch) {
                     const fid = folderMatch[1];
@@ -484,6 +506,26 @@ async function syncAndRebuild() {
                     if (!folderToLectures[fid].includes(lec)) folderToLectures[fid].push(lec);
                 }
             }
+        }
+
+        // Helper: extract a date from a string (supports "24.2.26", "2026-02-24", "24-02-26", "24_2_26")
+        function extractDate(str) {
+            // DD.MM.YY or DD.MM.YYYY
+            let m = str.match(/(\d{1,2})[.\-_](\d{1,2})[.\-_](\d{2,4})/);
+            if (m) {
+                const day = m[1].padStart(2, "0");
+                const month = m[2].padStart(2, "0");
+                let year = m[3];
+                if (year.length === 2) year = "20" + year;
+                return `${year}-${month}-${day}`;
+            }
+            return null;
+        }
+
+        // Helper: extract lecture number from string ("lesson3" → 3, "class2" → 2, "lecture 4" → 4)
+        function extractLessonNum(str) {
+            const m = str.match(/(?:lesson|class|lecture|tirgul|practice)[_\s-]*(\d+)/i);
+            return m ? parseInt(m[1]) : null;
         }
 
         for (const [folderId, data] of Object.entries(driveFiles)) {
@@ -499,23 +541,13 @@ async function syncAndRebuild() {
                 const displayName = file.isFolder ? ("📁 " + file.name) : file.name;
                 let matched = false;
 
-                // Strategy 1: Folder is directly referenced by a lecture card
-                const linkedLecs = folderToLectures[folderId];
-                if (linkedLecs && linkedLecs.length > 0) {
-                    const lec = linkedLecs[0]; // attach to the first lecture that links this folder
-                    if (!lec.files.some(f => f.u === fileUrl)) {
-                        lec.files.push({ n: displayName, u: fileUrl, t: type });
-                        lec._new = true;
-                        matched = true;
-                        newFilesCount++;
-                    }
-                }
-
-                // Strategy 2: Filename contains a date that matches a lecture
+                // Strategy 1: Date in filename or parent folder name → match to lecture on that date
                 if (!matched) {
-                    const dateInName = parseSheetDate(file.name);
-                    if (dateInName) {
-                        const lec = merged.find(l => l.date === dateInName && l.section === data.section);
+                    const dateFromFile = extractDate(file.name) || extractDate(data.label);
+                    if (dateFromFile) {
+                        // Try same section first, then any section
+                        const lec = merged.find(l => l.date === dateFromFile && l.section === data.section)
+                                 || merged.find(l => l.date === dateFromFile);
                         if (lec && !lec.files.some(f => f.u === fileUrl)) {
                             lec.files.push({ n: displayName, u: fileUrl, t: type });
                             lec._new = true;
@@ -525,9 +557,40 @@ async function syncAndRebuild() {
                     }
                 }
 
-                // Strategy 3: Filename keywords match a lecture title
+                // Strategy 2: Folder is directly referenced by a lecture card
                 if (!matched) {
-                    // Extract meaningful words from filename (strip extension, split on non-alpha)
+                    const linkedLecs = folderToLectures[folderId];
+                    if (linkedLecs && linkedLecs.length > 0) {
+                        const lec = linkedLecs[0];
+                        if (!lec.files.some(f => f.u === fileUrl)) {
+                            lec.files.push({ n: displayName, u: fileUrl, t: type });
+                            lec._new = true;
+                            matched = true;
+                            newFilesCount++;
+                        }
+                    }
+                }
+
+                // Strategy 3: Lesson/class number in filename → match to Nth lecture in section
+                if (!matched) {
+                    const num = extractLessonNum(file.name) || extractLessonNum(data.label);
+                    if (num) {
+                        const sectionLecs = merged.filter(l => l.section === data.section);
+                        // Nth lecture (1-indexed)
+                        if (num >= 1 && num <= sectionLecs.length) {
+                            const lec = sectionLecs[num - 1];
+                            if (!lec.files.some(f => f.u === fileUrl)) {
+                                lec.files.push({ n: displayName, u: fileUrl, t: type });
+                                lec._new = true;
+                                matched = true;
+                                newFilesCount++;
+                            }
+                        }
+                    }
+                }
+
+                // Strategy 4: Keyword match — filename words vs lecture title/desc
+                if (!matched) {
                     const words = nameLower.replace(/\.[^.]+$/, "").split(/[^a-z0-9]+/).filter(w => w.length > 2);
                     if (words.length > 0) {
                         let bestLec = null;
@@ -549,8 +612,8 @@ async function syncAndRebuild() {
                     }
                 }
 
-                // Strategy 4: Recording files → most recent lecture in same section
-                if (!matched && (type === "video" || /recording/i.test(data.label))) {
+                // Strategy 5: Recording files → most recent lecture in same section
+                if (!matched && (type === "video" || /recording/i.test(data.label) || /recording/i.test(file.name))) {
                     const candidates = merged.filter(l => l.section === data.section);
                     for (let i = candidates.length - 1; i >= 0; i--) {
                         const lec = candidates[i];
