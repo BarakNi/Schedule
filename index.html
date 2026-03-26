@@ -33,6 +33,7 @@
             <p>Your study hub · Timeline · Recordings · Materials</p>
         </div>
         <div class="header-actions">
+            <button class="header-btn" id="settingsToggle" aria-label="Settings" title="Settings">⚙️</button>
             <button class="header-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
         </div>
     </div>
@@ -101,6 +102,31 @@
     </div>
 
     <div class="toast" id="toast"></div>
+
+    <!-- Settings modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-icon">⚙️</div>
+            <h2 class="modal-title">Settings</h2>
+            <div class="modal-body">
+                <p>To enable file date detection during sync, paste a Google Drive API key below. It's stored only in this browser — never sent anywhere except Google's API.</p>
+                <p style="font-size:0.7rem;color:var(--text-muted)">
+                    Get a free key: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>
+                    → Create project → Enable "Google Drive API" → Create credentials → API key
+                </p>
+                <label for="driveKeyInput" style="font-size:0.75rem;font-weight:600;display:block;margin-top:0.6rem">Drive API Key</label>
+                <div style="display:flex;gap:0.4rem;margin-top:0.3rem">
+                    <input type="text" id="driveKeyInput" placeholder="AIzaSy..." style="flex:1;padding:0.45rem 0.6rem;font-family:monospace;font-size:0.78rem;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">
+                    <button class="modal-btn modal-btn-accept" id="saveKeyBtn">Save</button>
+                </div>
+                <div id="keyStatus" style="font-size:0.7rem;margin-top:0.3rem;min-height:1.2em"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" id="clearKeyBtn">Clear Key</button>
+                <button class="modal-btn modal-btn-cancel" id="closeSettingsBtn">Close</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Disclaimer modal -->
     <div class="modal-overlay" id="disclaimerModal">

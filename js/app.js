@@ -602,99 +602,58 @@ async function listFolderEmbed(folderId) {
 }
 
 // =====================================================================
-// Fetch file date via Drive's download endpoint.
-// Last-Modified is a CORS-safelisted response header — browsers can
-// read it without access-control-expose-headers.
-// We try direct fetch first (works when served over HTTP).
-// Fallback: use CORS proxy which may forward the header.
+// Folder listing: Drive API v3 (if key set) → embed view fallback
 // =====================================================================
-async function fetchFileDate(fileId) {
-    const directUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download`;
-
-    // Attempt 1: direct fetch (simple GET, no custom headers to avoid preflight)
+async function listFolderDriveAPI(folderId) {
+    if (!DRIVE_API_KEY) return null;
+    const items = [];
+    let pageToken = "";
     try {
-        const controller = new AbortController();
-        const resp = await fetch(directUrl, { signal: controller.signal });
-        const lastMod = resp.headers.get("last-modified");
-        controller.abort(); // don't download the whole file
-        if (lastMod) return lastMod;
-    } catch (e) {
-        // Expected to fail from file:// protocol
-    }
-
-    // Attempt 2: via CORS proxy (some forward last-modified)
-    for (const mkProxy of PROXIES) {
-        try {
-            const controller = new AbortController();
-            const resp = await fetch(mkProxy(directUrl), { signal: controller.signal });
-            const lastMod = resp.headers.get("last-modified");
-            controller.abort();
-            if (lastMod) return lastMod;
-        } catch (e) { /* try next */ }
-    }
-
-    return "";
+        do {
+            let url = `https://www.googleapis.com/drive/v3/files?q='${folderId}'+in+parents+and+trashed=false&fields=nextPageToken,files(id,name,mimeType,createdTime,modifiedTime)&pageSize=100&key=${DRIVE_API_KEY}`;
+            if (pageToken) url += `&pageToken=${pageToken}`;
+            const resp = await fetch(url);
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            if (data.files) items.push(...data.files);
+            pageToken = data.nextPageToken || "";
+        } while (pageToken);
+    } catch (e) { return null; }
+    return items.map(f => ({
+        id: f.id,
+        name: f.name,
+        isFolder: f.mimeType === "application/vnd.google-apps.folder",
+        created: f.createdTime || "",
+        modified: f.modifiedTime || ""
+    }));
 }
 
-// Enrich file list with dates by fetching each file's Last-Modified.
-// Batches requests to avoid hammering. Skips folders.
-async function enrichWithDates(items, statusEl, label) {
-    const files = items.filter(item => !item.isFolder && !item.created && !item.modified);
-    if (files.length === 0) return;
-
-    let done = 0;
-    // Process in batches of 4 to be polite
-    for (let i = 0; i < files.length; i += 4) {
-        const batch = files.slice(i, i + 4);
-        if (statusEl) {
-            done += batch.length;
-            statusEl.textContent = `📅 Fetching dates for ${label}... ${done}/${files.length}`;
-        }
-        const results = await Promise.all(batch.map(f => fetchFileDate(f.id)));
-        for (let j = 0; j < batch.length; j++) {
-            if (results[j]) {
-                batch[j].modified = results[j];
-                batch[j].created = results[j]; // Last-Modified is our best proxy for upload date
-            }
-        }
-    }
-}
-
-// Unified folder lister: embed view + date enrichment via HEAD requests
-// Returns array of { id, name, isFolder, created, modified }
 async function listFolder(folderId, statusEl, label) {
-    // Try Apps Script first if configured (has real dates)
+    // Drive API (if key configured) — returns real dates
+    if (DRIVE_API_KEY) {
+        const items = await listFolderDriveAPI(folderId);
+        if (items) return items;
+    }
+    // Apps Script (if URL configured) — returns real dates
     if (APPS_SCRIPT_URL) {
         try {
-            const url = `${APPS_SCRIPT_URL}?action=list&recursive=1&folders=${folderId}`;
-            const resp = await fetch(url);
+            const resp = await fetch(`${APPS_SCRIPT_URL}?action=list&recursive=1&folders=${folderId}`);
             if (resp.ok) {
                 const data = await resp.json();
                 if (data[folderId] && Array.isArray(data[folderId])) {
                     return data[folderId].map(item => ({
-                        id: item.id,
-                        name: item.name,
+                        id: item.id, name: item.name,
                         isFolder: item.type === "folder",
-                        created: item.created || "",
-                        modified: item.updated || "",
-                        parentFolder: item.folder || ""
+                        created: item.created || "", modified: item.updated || ""
                     }));
                 }
             }
-        } catch (e) { console.warn("[sync] Apps Script failed:", e.message); }
+        } catch (e) {}
     }
-
-    // Embed view + date enrichment
-    const items = (await listFolderEmbed(folderId)).map(item => ({
-        ...item,
-        created: "",
-        modified: item.modified || ""
+    // Embed view fallback — dates from HTML if available
+    return (await listFolderEmbed(folderId)).map(item => ({
+        ...item, created: "", modified: item.modified || ""
     }));
-
-    // Fetch real dates for files that don't have them
-    await enrichWithDates(items, statusEl, label || folderId);
-
-    return items;
 }
 
 // =====================================================================
@@ -1163,11 +1122,80 @@ function initDisclaimer() {
 }
 
 // =====================================================================
+// SETTINGS MODAL
+// =====================================================================
+function initSettings() {
+    const modal = document.getElementById("settingsModal");
+    const input = document.getElementById("driveKeyInput");
+    const saveBtn = document.getElementById("saveKeyBtn");
+    const clearBtn = document.getElementById("clearKeyBtn");
+    const closeBtn = document.getElementById("closeSettingsBtn");
+    const status = document.getElementById("keyStatus");
+    const toggleBtn = document.getElementById("settingsToggle");
+
+    // Show current key (masked)
+    function showKeyStatus() {
+        const key = localStorage.getItem("ai8_drive_key");
+        if (key) {
+            input.value = key;
+            status.textContent = "✅ Key saved in this browser";
+            status.style.color = "var(--green)";
+        } else {
+            input.value = "";
+            status.textContent = "No key set — file dates won't be available during sync";
+            status.style.color = "var(--text-muted)";
+        }
+    }
+
+    toggleBtn.addEventListener("click", () => {
+        showKeyStatus();
+        modal.classList.add("visible");
+    });
+
+    saveBtn.addEventListener("click", async () => {
+        const key = input.value.trim();
+        if (!key) { status.textContent = "Please enter a key"; status.style.color = "var(--red)"; return; }
+
+        // Quick validation: try a test request
+        status.textContent = "⏳ Testing key...";
+        status.style.color = "var(--text-muted)";
+        try {
+            const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q='15xNmQQEWxHzJgmP9RPUac9h1pC8Z9YyF'+in+parents&pageSize=1&fields=files(id)&key=${key}`);
+            if (resp.ok) {
+                localStorage.setItem("ai8_drive_key", key);
+                status.textContent = "✅ Key works! Saved. Sync will now fetch file dates.";
+                status.style.color = "var(--green)";
+                // Reload DRIVE_API_KEY
+                window.location.reload();
+            } else {
+                const err = await resp.json();
+                status.textContent = "❌ " + (err.error?.message || "Invalid key");
+                status.style.color = "var(--red)";
+            }
+        } catch (e) {
+            status.textContent = "❌ Network error: " + e.message;
+            status.style.color = "var(--red)";
+        }
+    });
+
+    clearBtn.addEventListener("click", () => {
+        localStorage.removeItem("ai8_drive_key");
+        input.value = "";
+        status.textContent = "Key removed";
+        status.style.color = "var(--text-muted)";
+    });
+
+    closeBtn.addEventListener("click", () => modal.classList.remove("visible"));
+    modal.addEventListener("click", e => { if (e.target === modal) modal.classList.remove("visible"); });
+}
+
+// =====================================================================
 // INIT
 // =====================================================================
 function init() {
     initTheme();
     initDisclaimer();
+    initSettings();
 
     // Load from cache or use baseline
     const cached = loadCache();

@@ -34,6 +34,13 @@ const CT = "ai8_ts_v2";
 const APPS_SCRIPT_URL = "";
 
 // =====================================================================
+// Optional: Google Drive API key for fetching real file dates.
+// If empty, falls back to embed view (dates may be unavailable).
+// To enable: set via browser console: localStorage.setItem("ai8_drive_key", "YOUR_KEY")
+// =====================================================================
+const DRIVE_API_KEY = localStorage.getItem("ai8_drive_key") || "";
+
+// =====================================================================
 // RECORDING FOLDERS — these contain Zoom recordings, organized by date
 // Type: "recording" — shown in timeline view
 // =====================================================================
