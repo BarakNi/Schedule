@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head><title>Date Fetch Test</title>
+<style>body{font-family:monospace;padding:1em}pre{white-space:pre-wrap;background:#f5f5f5;padding:1em;border-radius:8px}</style>
+</head>
+<body>
+<h2>Testing Last-Modified fetch from Google Drive</h2>
+<p>File: 01. Data Science Foundations.pdf<br>
+Expected last-modified: Tue, 17 Mar 2026 (confirmed via curl)</p>
+<p><strong>Page served from:</strong> <span id="origin"></span></p>
+<pre id="log">Running tests...</pre>
+<script>
+document.getElementById("origin").textContent = location.protocol + "//" + location.host + " (" + location.protocol + ")";
+const log = document.getElementById("log");
+function out(msg) { log.textContent += "\n" + msg; }
+
+const FILE_ID = "16rqyENGCgSzFRRWelhvDV0AGcT6OPdA4";
+const DIRECT = `https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download`;
+const REDIRECT = `https://drive.google.com/uc?id=${FILE_ID}&export=download`;
+
+async function testFetch(label, url, opts) {
+    out("--- " + label + " ---");
+    out("URL: " + url.substring(0, 80) + "...");
+    try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const resp = await fetch(url, { ...opts, signal: controller.signal });
+        clearTimeout(timer);
+        out("Status: " + resp.status + " | Type: " + resp.type);
+        const headers = [];
+        resp.headers.forEach((v, k) => headers.push(k + ": " + v));
+        out("Visible headers (" + headers.length + "):");
+        headers.forEach(h => out("  " + h));
+        out("last-modified: " + (resp.headers.get("last-modified") || "NULL"));
+        controller.abort();
+    } catch(e) {
+        out("FAILED: " + e.message);
+    }
+    out("");
+}
+
+async function run() {
+    // Test 1: Direct to drive.usercontent.google.com
+    await testFetch("1. Direct GET (no custom headers)", DIRECT, {});
+
+    // Test 2: Direct to drive.google.com/uc (redirect endpoint)
+    await testFetch("2. Redirect endpoint GET", REDIRECT, {});
+
+    // Test 3: corsproxy.io
+    await testFetch("3. corsproxy.io", "https://corsproxy.io/?" + encodeURIComponent(DIRECT), {});
+
+    // Test 4: allorigins raw
+    await testFetch("4. allorigins /raw", "https://api.allorigins.win/raw?url=" + encodeURIComponent(DIRECT), {});
+
+    // Test 5: codetabs
+    await testFetch("5. codetabs", "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(DIRECT), {});
+
+    out("=== ALL TESTS DONE ===");
+}
+
+run();
+</script>
+</body>
+</html>

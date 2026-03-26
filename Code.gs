@@ -33,14 +33,16 @@ function doGet(e) {
  */
 function listFolders(e) {
   var folderIds = (e.parameter.folders || "").split(",").filter(Boolean);
+  var recursive = (e.parameter.recursive || "0") === "1";
   var result = {};
 
-  for (var i = 0; i < folderIds.length; i++) {
-    var fid = folderIds[i].trim();
+  function scanFolder(fid, depth) {
+    if (depth > 3) return [];
     try {
       var folder = DriveApp.getFolderById(fid);
-      var files = folder.getFiles();
       var items = [];
+
+      var files = folder.getFiles();
       while (files.hasNext()) {
         var f = files.next();
         items.push({
@@ -49,10 +51,13 @@ function listFolders(e) {
           type: f.getMimeType(),
           url: f.getUrl(),
           size: f.getSize(),
-          updated: f.getLastUpdated().toISOString()
+          created: f.getDateCreated().toISOString(),
+          updated: f.getLastUpdated().toISOString(),
+          folder: folder.getName(),
+          folderId: fid
         });
       }
-      // Also list subfolders
+
       var subs = folder.getFolders();
       while (subs.hasNext()) {
         var sf = subs.next();
@@ -61,13 +66,25 @@ function listFolders(e) {
           id: sf.getId(),
           type: "folder",
           url: sf.getUrl(),
-          updated: sf.getLastUpdated().toISOString()
+          created: sf.getDateCreated().toISOString(),
+          updated: sf.getLastUpdated().toISOString(),
+          folder: folder.getName(),
+          folderId: fid
         });
+        if (recursive) {
+          var subItems = scanFolder(sf.getId(), depth + 1);
+          items = items.concat(subItems);
+        }
       }
-      result[fid] = items;
+      return items;
     } catch (err) {
-      result[fid] = { error: err.message };
+      return [{ error: err.message, folderId: fid }];
     }
+  }
+
+  for (var i = 0; i < folderIds.length; i++) {
+    var fid = folderIds[i].trim();
+    result[fid] = scanFolder(fid, 0);
   }
 
   return jsonResponse(result);

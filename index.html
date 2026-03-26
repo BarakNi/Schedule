@@ -30,7 +30,7 @@
         <div class="header-content">
             <span class="header-emoji">🎓</span>
             <h1>מחזור 8 — AI Engineer Course</h1>
-            <p>Your study hub · Lectures · Recordings · Materials</p>
+            <p>Your study hub · Timeline · Recordings · Materials</p>
         </div>
         <div class="header-actions">
             <button class="header-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
@@ -51,7 +51,12 @@
 
     <div class="container">
         <div class="toolbar">
-            <input type="text" class="search-bar" placeholder="Search lectures, topics, files..." id="searchInput" aria-label="Search">
+            <input type="text" class="search-bar" placeholder="Search sessions, topics, files..." id="searchInput" aria-label="Search">
+            <div class="view-toggle" role="tablist" aria-label="View mode">
+                <button class="view-btn active" data-view="timeline" role="tab" aria-selected="true">📅 Timeline</button>
+                <button class="view-btn" data-view="recordings" role="tab" aria-selected="false">🎬 Recordings</button>
+                <button class="view-btn" data-view="content" role="tab" aria-selected="false">📁 Content</button>
+            </div>
             <button class="refresh-btn" id="refreshBtn" aria-label="Fetch new content from Drive and spreadsheet">
                 <span class="refresh-icon">&#x21bb;</span> Sync
             </button>
@@ -62,7 +67,7 @@
             <div class="last-updated" id="lastUpdated"></div>
         </div>
 
-        <div id="lectureList"><div class="loading"><span class="spinner">&#x21bb;</span> Loading...</div></div>
+        <div id="mainView"><div class="loading"><span class="spinner">&#x21bb;</span> Loading...</div></div>
     </div>
 
     <div class="footer">
@@ -97,7 +102,7 @@
 
     <div class="toast" id="toast"></div>
 
-    <!-- Disclaimer modal — intercepts all outbound link clicks -->
+    <!-- Disclaimer modal -->
     <div class="modal-overlay" id="disclaimerModal">
         <div class="modal">
             <div class="modal-icon">⚖️</div>
@@ -108,14 +113,12 @@
                     source code, exercises, and documentation — is the exclusive intellectual property of
                     <strong>The Hebrew University of Jerusalem</strong> (האוניברסיטה העברית בירושלים).
                 </p>
-                <p>
-                    By proceeding, you confirm and agree that:
-                </p>
+                <p>By proceeding, you confirm and agree that:</p>
                 <ul>
                     <li>You are an enrolled student of the AI Engineer Course — מחזור 8 (Cohort 8).</li>
                     <li>You will use these materials solely for personal, non-commercial, educational purposes.</li>
-                    <li>You will not copy, redistribute, reproduce, publicly display, transmit, or create derivative works from these materials — in whole or in part — without express prior written permission.</li>
-                    <li>You understand that violations may result in disciplinary action, civil liability, and criminal prosecution under Israeli Copyright Law (חוק זכות יוצרים, התשס״ח-2007) and applicable international treaties.</li>
+                    <li>You will not copy, redistribute, reproduce, publicly display, transmit, or create derivative works from these materials.</li>
+                    <li>You understand that violations may result in disciplinary action, civil liability, and criminal prosecution.</li>
                 </ul>
             </div>
             <div class="modal-actions">
