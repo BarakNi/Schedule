@@ -109,11 +109,17 @@
             <div class="modal-icon">⚙️</div>
             <h2 class="modal-title">Settings</h2>
             <div class="modal-body">
-                <p>To enable file date detection during sync, paste a Google Drive API key below. It's stored only in this browser — never sent anywhere except Google's API.</p>
-                <p style="font-size:0.7rem;color:var(--text-muted)">
-                    Get a free key: <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a>
-                    → Create project → Enable "Google Drive API" → Create credentials → API key
-                </p>
+                <p>Baseline files use session dates. To get real file dates during sync, you can optionally add a Google Drive API key. It stays in this browser only.</p>
+                <details style="margin-top:0.5rem">
+                    <summary style="font-size:0.75rem;cursor:pointer;color:var(--accent)">How to get a free API key (optional, 2 min)</summary>
+                    <ol style="font-size:0.7rem;color:var(--text-secondary);margin:0.3rem 0 0 1rem;line-height:1.7">
+                        <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">console.cloud.google.com/apis/credentials</a></li>
+                        <li>Create a project (or select existing)</li>
+                        <li>Click "Enable APIs" → search "Google Drive API" → Enable</li>
+                        <li>Go back to Credentials → Create Credentials → API key</li>
+                        <li>Copy and paste below</li>
+                    </ol>
+                </details>
                 <label for="driveKeyInput" style="font-size:0.75rem;font-weight:600;display:block;margin-top:0.6rem">Drive API Key</label>
                 <div style="display:flex;gap:0.4rem;margin-top:0.3rem">
                     <input type="text" id="driveKeyInput" placeholder="AIzaSy..." style="flex:1;padding:0.45rem 0.6rem;font-family:monospace;font-size:0.78rem;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)">

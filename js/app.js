@@ -91,6 +91,38 @@ function guessFileType(name) {
     return "link";
 }
 
+// Extract human-readable topic names from content filenames.
+// "01. Data Science Foundations.pdf" → "Data Science Foundations"
+// "lesson3_animal_abstract.py" → skipped (code file, not a topic)
+// "📁 Supervised Learning" → "Supervised Learning"
+function extractTopics(files) {
+    if (!files || !files.length) return [];
+    const topics = [];
+    const seen = new Set();
+    for (const f of files) {
+        const raw = f.n || f.name || "";
+        // Skip folder links, recordings, generic files
+        if (/^📁/.test(raw)) continue;
+        if (/recording|zoom/i.test(raw)) continue;
+        // Only consider PDFs, slides, notebooks as topic sources
+        const type = f.t || f.type || "";
+        if (type !== "pdf" && type !== "slides" && type !== "notebook") continue;
+        // Clean the filename
+        let topic = raw
+            .replace(/\.[^.]+$/, "")           // remove extension
+            .replace(/^[\d]+[\.\)\-_\s]+/, "")  // remove leading numbers "01. " "1) "
+            .replace(/^📓\s*|^📄\s*|^📊\s*/, "") // remove emoji prefixes
+            .replace(/_/g, " ")                 // underscores to spaces
+            .trim();
+        if (topic.length < 3) continue;
+        const key = topic.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        topics.push(topic);
+    }
+    return topics;
+}
+
 function parseSheetDate(raw) {
     const m = String(raw).match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
     if (!m) return null;
@@ -1013,6 +1045,15 @@ async function syncAndRebuild() {
             return da.localeCompare(db);
         });
 
+        // Auto-generate descriptions from content filenames
+        for (const s of merged) {
+            if (s._isUnmatched) continue;
+            const topics = extractTopics(s.content);
+            if (topics.length > 0 && (!s.desc || s.desc === "Discovered during sync")) {
+                s.desc = topics.join(", ");
+            }
+        }
+
         sessions = merged;
         saveCache(sessions);
         renderCurrentView();
@@ -1203,6 +1244,18 @@ function init() {
         sessions = cached;
     } else {
         sessions = JSON.parse(JSON.stringify(SESSIONS));
+        // Stamp baseline content files with session date as their created date
+        for (const s of sessions) {
+            for (const f of (s.content || [])) {
+                if (!f._created) f._created = s.date;
+                if (!f._uploadDate) f._uploadDate = s.date;
+            }
+            // Auto-generate description from content filenames if missing
+            const topics = extractTopics(s.content);
+            if (topics.length > 0 && !s.desc) {
+                s.desc = topics.join(", ");
+            }
+        }
     }
     renderCurrentView();
     updateTimestamp();
